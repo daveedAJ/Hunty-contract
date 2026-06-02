@@ -4,6 +4,7 @@
 
 ### Prerequisites Installation
 
+
 **macOS:**
 ```bash
 # Install Rust
