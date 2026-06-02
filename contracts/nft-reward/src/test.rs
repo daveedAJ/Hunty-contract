@@ -33,6 +33,8 @@ fn create_metadata(env: &Env, title: &str, desc: &str, image_uri: &str) -> NftMe
         hunt_title: String::from_str(env, title),
         rarity: 0u32,
         tier: 0u32,
+        creator: None,
+        royalty_bps: None,
     }
 }
 
@@ -52,6 +54,28 @@ fn create_metadata_full(
         hunt_title: String::from_str(env, hunt_title),
         rarity,
         tier,
+        creator: None,
+        royalty_bps: None,
+    }
+}
+
+fn create_metadata_with_creator(
+    env: &Env,
+    title: &str,
+    desc: &str,
+    image_uri: &str,
+    creator: Address,
+    royalty_bps: Option<u32>,
+) -> NftMetadata {
+    NftMetadata {
+        title: String::from_str(env, title),
+        description: String::from_str(env, desc),
+        image_uri: String::from_str(env, image_uri),
+        hunt_title: String::from_str(env, title),
+        rarity: 0u32,
+        tier: 0u32,
+        creator: Some(creator),
+        royalty_bps,
     }
 }
 
@@ -462,7 +486,160 @@ fn test_get_nft_owner_matches_owner_of() {
     assert_eq!(client.get_nft_owner(&nft_id), Some(player));
 }
 
-// --- initialize / access-control tests ---
+#[test]
+fn test_nft_with_creator_attribution() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register_contract(None, NftReward));
+
+    let creator = Address::generate(&env);
+    let player = Address::generate(&env);
+    let metadata = create_metadata_with_creator(
+        &env,
+        "Creator NFT",
+        "NFT with creator attribution",
+        "ipfs://creator",
+        creator.clone(),
+        None,
+    );
+
+    let nft_id = client.mint_reward_nft(&1, &player, &metadata);
+
+    let nft = client.get_nft(&nft_id).unwrap();
+    assert_eq!(nft.metadata.creator, Some(creator.clone()));
+    assert_eq!(nft.metadata.royalty_bps, None);
+
+    let meta = client.get_nft_metadata(&nft_id).unwrap();
+    assert_eq!(meta.creator, Some(creator));
+    assert_eq!(meta.royalty_bps, None);
+}
+
+#[test]
+fn test_nft_with_creator_and_royalty() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register_contract(None, NftReward));
+
+    let creator = Address::generate(&env);
+    let player = Address::generate(&env);
+    let royalty_bps = 250u32; // 2.5% royalty
+    let metadata = create_metadata_with_creator(
+        &env,
+        "Royalty NFT",
+        "NFT with creator and royalty",
+        "ipfs://royalty",
+        creator.clone(),
+        Some(royalty_bps),
+    );
+
+    let nft_id = client.mint_reward_nft(&1, &player, &metadata);
+
+    let nft = client.get_nft(&nft_id).unwrap();
+    assert_eq!(nft.metadata.creator, Some(creator.clone()));
+    assert_eq!(nft.metadata.royalty_bps, Some(royalty_bps));
+
+    let meta = client.get_nft_metadata(&nft_id).unwrap();
+    assert_eq!(meta.creator, Some(creator));
+    assert_eq!(meta.royalty_bps, Some(royalty_bps));
+}
+
+#[test]
+fn test_nft_without_creator_defaults_to_none() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register_contract(None, NftReward));
+
+    let player = Address::generate(&env);
+    let metadata = create_metadata(&env, "No Creator", "No creator set", "ipfs://nocreator");
+
+    let nft_id = client.mint_reward_nft(&1, &player, &metadata);
+
+    let nft = client.get_nft(&nft_id).unwrap();
+    assert_eq!(nft.metadata.creator, None);
+    assert_eq!(nft.metadata.royalty_bps, None);
+}
+
+#[test]
+fn test_mint_from_map_with_creator_and_royalty() {
+    use soroban_sdk::{Map, Symbol};
+
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register_contract(None, NftReward));
+
+    let creator = Address::generate(&env);
+    let player = Address::generate(&env);
+
+    let mut metadata = Map::new(&env);
+    metadata.set(Symbol::new(&env, "title"), String::from_str(&env, "Map NFT"));
+    metadata.set(
+        Symbol::new(&env, "description"),
+        String::from_str(&env, "NFT from map"),
+    );
+    metadata.set(
+        Symbol::new(&env, "image_uri"),
+        String::from_str(&env, "ipfs://map"),
+    );
+    metadata.set(Symbol::new(&env, "creator"), creator.clone());
+    metadata.set(Symbol::new(&env, "royalty_bps"), 500u32);
+
+    let nft_id = client.mint_reward_nft_from_map(&1, &player, &metadata);
+
+    let nft = client.get_nft(&nft_id).unwrap();
+    assert_eq!(nft.metadata.creator, Some(creator.clone()));
+    assert_eq!(nft.metadata.royalty_bps, Some(500u32));
+}
+
+#[test]
+fn test_mint_from_map_creator_defaults_to_player() {
+    use soroban_sdk::{Map, Symbol};
+
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register_contract(None, NftReward));
+
+    let player = Address::generate(&env);
+
+    let mut metadata = Map::new(&env);
+    metadata.set(Symbol::new(&env, "title"), String::from_str(&env, "Default Creator"));
+
+    let nft_id = client.mint_reward_nft_from_map(&1, &player, &metadata);
+
+    let nft = client.get_nft(&nft_id).unwrap();
+    // When creator is not specified in map, it defaults to player_address
+    assert_eq!(nft.metadata.creator, Some(player));
+    assert_eq!(nft.metadata.royalty_bps, None);
+}
+
+#[test]
+fn test_creator_preserved_across_metadata_queries() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register_contract(None, NftReward));
+
+    let creator = Address::generate(&env);
+    let player = Address::generate(&env);
+    let metadata = create_metadata_with_creator(
+        &env,
+        "Preserved Creator",
+        "Creator should be preserved",
+        "ipfs://preserved",
+        creator.clone(),
+        Some(1000u32),
+    );
+
+    let nft_id = client.mint_reward_nft(&42, &player, &metadata);
+
+    // Query via get_nft
+    let nft = client.get_nft(&nft_id).unwrap();
+    assert_eq!(nft.metadata.creator, Some(creator.clone()));
+    assert_eq!(nft.metadata.royalty_bps, Some(1000u32));
+
+    // Query via get_nft_metadata
+    let meta = client.get_nft_metadata(&nft_id).unwrap();
+    assert_eq!(meta.creator, Some(creator.clone()));
+    assert_eq!(meta.royalty_bps, Some(1000u32));
+    assert_eq!(meta.current_owner, player);
+}
+
+#[test]
+fn test_burn_removes_nft_and_clears_owner_list() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register_contract(None, NftReward));
 
 #[test]
 fn test_initialize_stores_admin_and_minter() {
