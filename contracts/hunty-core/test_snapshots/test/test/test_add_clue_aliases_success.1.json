@@ -1,9 +1,10 @@
 {
   "generators": {
-    "address": 3,
+    "address": 2,
     "nonce": 0
   },
   "auth": [
+    [],
     [],
     [
       [
@@ -11,20 +12,22 @@
         {
           "function": {
             "contract_fn": {
-              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
               "function_name": "",
               "args": []
             }
           },
           "sub_invocations": []
         }
-      ],
+      ]
+    ],
+    [
       [
-        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
         {
           "function": {
             "contract_fn": {
-              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
               "function_name": "",
               "args": []
             }
@@ -37,7 +40,7 @@
   "ledger": {
     "protocol_version": 22,
     "sequence_number": 0,
-    "timestamp": 1700000002,
+    "timestamp": 1700000000,
     "network_id": "0000000000000000000000000000000000000000000000000000000000000000",
     "base_reserve": 0,
     "min_persistent_entry_ttl": 4096,
@@ -80,7 +83,7 @@
       [
         {
           "contract_data": {
-            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
             "key": {
               "ledger_key_nonce": {
                 "nonce": 5541220902715666415
@@ -95,7 +98,7 @@
             "data": {
               "contract_data": {
                 "ext": "v0",
-                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
                 "key": {
                   "ledger_key_nonce": {
                     "nonce": 5541220902715666415
@@ -113,7 +116,7 @@
       [
         {
           "contract_data": {
-            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
             "key": "ledger_key_contract_instance",
             "durability": "persistent"
           }
@@ -124,7 +127,7 @@
             "data": {
               "contract_data": {
                 "ext": "v0",
-                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
                 "key": "ledger_key_contract_instance",
                 "durability": "persistent",
                 "val": {
@@ -228,7 +231,13 @@
                               "val": {
                                 "vec": [
                                   {
-                                    "bytes": "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb"
+                                    "bytes": "1865e4f9be9639fc76d7d4da8ee25eaa7421f6837accb67516937e69469ea7e4"
+                                  },
+                                  {
+                                    "bytes": "a1ed2667544204982407a78f80038326f874646daaae450d25f736742d7e5bc1"
+                                  },
+                                  {
+                                    "bytes": "abecdf3503635c0be9eca61cddf5b25c7f8380d5aae7d73d0f62e9a38c87b70d"
                                   }
                                 ]
                               }
@@ -254,7 +263,7 @@
                                 "symbol": "points"
                               },
                               "val": {
-                                "u32": 1
+                                "u32": 10
                               }
                             },
                             {
@@ -262,7 +271,7 @@
                                 "symbol": "question"
                               },
                               "val": {
-                                "string": "Q"
+                                "string": "Capital of USA?"
                               }
                             }
                           ]
@@ -286,7 +295,7 @@
                                 "symbol": "activated_at"
                               },
                               "val": {
-                                "u64": 1700000000
+                                "u64": 0
                               }
                             },
                             {
@@ -318,7 +327,7 @@
                                 "symbol": "end_time"
                               },
                               "val": {
-                                "u64": 1700000001
+                                "u64": 0
                               }
                             },
                             {
@@ -410,7 +419,7 @@
                               "val": {
                                 "vec": [
                                   {
-                                    "symbol": "Active"
+                                    "symbol": "Draft"
                                   }
                                 ]
                               }
@@ -471,61 +480,13 @@
     {
       "event": {
         "ext": "v0",
-        "contract_id": "0000000000000000000000000000000000000000000000000000000000000003",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000002",
         "type_": "contract",
         "body": {
           "v0": {
             "topics": [
               {
-                "symbol": "HuntCreated"
-              },
-              {
-                "u64": 1
-              }
-            ],
-            "data": {
-              "map": [
-                {
-                  "key": {
-                    "symbol": "creator"
-                  },
-                  "val": {
-                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "hunt_id"
-                  },
-                  "val": {
-                    "u64": 1
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "title"
-                  },
-                  "val": {
-                    "string": "Hunt"
-                  }
-                }
-              ]
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "0000000000000000000000000000000000000000000000000000000000000003",
-        "type_": "contract",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "ClueAdded"
+                "symbol": "ClueAliasesAdded"
               },
               {
                 "u64": 1
@@ -536,6 +497,14 @@
             ],
             "data": {
               "map": [
+                {
+                  "key": {
+                    "symbol": "aliases_count"
+                  },
+                  "val": {
+                    "u32": 2
+                  }
+                },
                 {
                   "key": {
                     "symbol": "clue_id"
@@ -550,70 +519,6 @@
                   },
                   "val": {
                     "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "hunt_id"
-                  },
-                  "val": {
-                    "u64": 1
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "is_required"
-                  },
-                  "val": {
-                    "bool": true
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "points"
-                  },
-                  "val": {
-                    "u32": 1
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "question"
-                  },
-                  "val": {
-                    "string": "Q"
-                  }
-                }
-              ]
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "0000000000000000000000000000000000000000000000000000000000000003",
-        "type_": "contract",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "HuntActivated"
-              },
-              {
-                "u64": 1
-              }
-            ],
-            "data": {
-              "map": [
-                {
-                  "key": {
-                    "symbol": "activated_at"
-                  },
-                  "val": {
-                    "u64": 1700000000
                   }
                 },
                 {

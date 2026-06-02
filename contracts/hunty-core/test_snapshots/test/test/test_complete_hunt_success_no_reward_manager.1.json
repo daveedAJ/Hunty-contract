@@ -421,26 +421,10 @@
                     },
                     {
                       "key": {
-                        "symbol": "hunt_id"
-                      },
-                      "val": {
-                        "u64": 1
-                      }
-                    },
-                    {
-                      "key": {
                         "symbol": "is_completed"
                       },
                       "val": {
                         "bool": true
-                      }
-                    },
-                    {
-                      "key": {
-                        "symbol": "player"
-                      },
-                      "val": {
-                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                       }
                     },
                     {
@@ -589,10 +573,14 @@
                           "map": [
                             {
                               "key": {
-                                "symbol": "answer_hash"
+                                "symbol": "answer_hashes"
                               },
                               "val": {
-                                "bytes": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35"
+                                "vec": [
+                                  {
+                                    "bytes": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35"
+                                  }
+                                ]
                               }
                             },
                             {
