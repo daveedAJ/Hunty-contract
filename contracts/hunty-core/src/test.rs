@@ -1272,6 +1272,45 @@ mod test {
     }
 
     #[test]
+    fn test_register_player_double_registration_race() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+        let question = String::from_str(&env, "Q");
+        let answer = String::from_str(&env, "a");
+
+        let (hunt_id, contract_id) = with_core_contract(&env, |env, cid| {
+            let hunt_id = HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(&env, "Hunt"),
+                String::from_str(&env, "Desc"),
+                None,
+                None,
+            )
+            .unwrap();
+            HuntyCore::add_clue(env.clone(), hunt_id, question, answer, 1, true).unwrap();
+            HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+            (hunt_id, cid.clone())
+        });
+
+        // Each register_player call needs its own contract frame to avoid
+        // Error(Auth, ExistingValue) from re-authorizing the same address.
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap();
+        });
+
+        let err = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap_err()
+        });
+
+        assert_eq!(err, HuntErrorCode::DuplicateRegistration);
+    }
+
+    #[test]
     fn test_register_player_duplicate_fails() {
         let env = Env::default();
         env.ledger().set_timestamp(1_700_000_000);
@@ -1349,8 +1388,6 @@ mod test {
             let err =
                 HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap_err();
             assert_eq!(err, HuntErrorCode::DuplicateRegistration);
-
-            Ok(())
         });
     }
 
