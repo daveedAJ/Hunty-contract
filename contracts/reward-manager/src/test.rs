@@ -437,6 +437,7 @@ mod test {
             let result = RewardManager::validate_pool(env.clone(), 99, 1_000);
             assert!(!result.is_valid);
             assert_eq!(result.balance, 0);
+            assert_eq!(result.required, 1_000);
         });
     }
 
