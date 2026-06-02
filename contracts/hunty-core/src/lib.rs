@@ -1,14 +1,14 @@
 #![no_std]
 extern crate alloc;
-use alloc::string::String as StdString;
 use crate::errors::{HuntError, HuntErrorCode};
 use crate::storage::Storage;
 use crate::types::{
     AnswerIncorrectEvent, Clue, ClueAddedEvent, ClueCompletedEvent, ClueInfo, ClueRemovedEvent,
     Hunt, HuntActivatedEvent, HuntCancelledEvent, HuntCompletedEvent, HuntCreatedEvent,
     HuntDeactivatedEvent, HuntStatistics, HuntStatus, LeaderboardEntry, PlayerProgress,
-    PlayerRegisteredEvent, RewardClaimFailedEvent, RewardClaimedEvent, RewardConfig,
+    PlayerRegisteredEvent, RewardClaimedEvent, RewardConfig, TimeBonusConfig,
 };
+use alloc::string::String as StdString;
 use reward_manager::RewardErrorCode;
 use soroban_sdk::{
     contract, contractimpl, Address, Bytes, BytesN, Env, IntoVal, String, Symbol, Val, Vec,
@@ -166,6 +166,9 @@ impl HuntyCore {
             start_time: start_time.unwrap_or(0),
             end_time: end_time.unwrap_or(0),
             reward_config,
+            time_bonus_start_bps: None,
+            time_bonus_min_bps: None,
+            time_bonus_decay_secs: None,
             total_clues: 0, // Empty clue list initially
             required_clues: 0,
             max_attempts_per_clue: DEFAULT_MAX_ATTEMPTS_PER_CLUE,
@@ -186,68 +189,46 @@ impl HuntyCore {
         Ok(hunt_id)
     }
 
-    /// Creates a new draft hunt by copying clues from an existing completed hunt.
-    ///
-    /// The template hunt must already be completed. The copied hunt starts as a fresh
-    /// draft with a new hunt ID, creator, title, and description, but reuses the
-    /// template's clue questions, hashes, points, and required flags.
-    pub fn create_hunt_from_template(
+    /// Sets an optional time-based scoring bonus for a draft hunt.
+    /// The bonus is applied to each clue score as it is completed.
+    pub fn set_time_bonus_config(
         env: Env,
-        template_hunt_id: u64,
-        creator: Address,
-        title: String,
-        description: String,
-        start_time: Option<u64>,
-        end_time: Option<u64>,
-    ) -> Result<u64, HuntErrorCode> {
-        let template_hunt =
-            Storage::get_hunt(&env, template_hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
+        hunt_id: u64,
+        caller: Address,
+        time_bonus_config: Option<TimeBonusConfig>,
+    ) -> Result<(), HuntErrorCode> {
+        caller.require_auth();
 
-        if template_hunt.status != HuntStatus::Completed {
+        let mut hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
+
+        if caller != hunt.creator {
+            return Err(HuntErrorCode::Unauthorized);
+        }
+
+        if hunt.status != HuntStatus::Draft {
             return Err(HuntErrorCode::InvalidHuntStatus);
         }
 
-        let hunt_id = Self::create_hunt(
-            env.clone(),
-            creator.clone(),
-            title,
-            description,
-            start_time,
-            end_time,
-        )?;
-
-        let template_clues = Storage::list_clues_for_hunt(&env, template_hunt_id);
-        let mut hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
-
-        for i in 0..template_clues.len() {
-            let clue = template_clues.get(i).unwrap();
-            let cloned_clue = Clue {
-                clue_id: Storage::next_clue_id(&env, hunt_id),
-                question: clue.question,
-                answer_hash: clue.answer_hash,
-                points: clue.points,
-                is_required: clue.is_required,
-            };
-
-            Storage::save_clue(&env, hunt_id, &cloned_clue);
-            hunt.total_clues += 1;
-            if cloned_clue.is_required {
-                hunt.required_clues += 1;
+        if let Some(config) = time_bonus_config.as_ref() {
+            if !config.is_valid() {
+                return Err(HuntErrorCode::InvalidTimeBonusConfig);
             }
-
-            let event = ClueAddedEvent {
-                hunt_id,
-                clue_id: cloned_clue.clue_id,
-                creator: creator.clone(),
-                points: cloned_clue.points,
-                is_required: cloned_clue.is_required,
-            };
-            env.events()
-                .publish((Symbol::new(&env, "ClueAdded"), hunt_id, cloned_clue.clue_id), event);
         }
 
+        match time_bonus_config {
+            Some(config) => {
+                hunt.time_bonus_start_bps = Some(config.start_multiplier_bps);
+                hunt.time_bonus_min_bps = Some(config.min_multiplier_bps);
+                hunt.time_bonus_decay_secs = Some(config.decay_duration_secs);
+            }
+            None => {
+                hunt.time_bonus_start_bps = None;
+                hunt.time_bonus_min_bps = None;
+                hunt.time_bonus_decay_secs = None;
+            }
+        }
         Storage::save_hunt(&env, &hunt);
-        Ok(hunt_id)
+        Ok(())
     }
 
     /// Updates a draft hunt's title and description. Only the hunt creator can update it.
@@ -352,7 +333,7 @@ impl HuntyCore {
             creator: updated.creator.clone(),
             points,
             is_required,
-            difficulty,
+            public_question: false,
         };
         env.events()
             .publish((Symbol::new(&env, "ClueAdded"), hunt_id, clue_id), event);
@@ -454,8 +435,6 @@ impl HuntyCore {
             return Err(HuntError::InvalidAnswer);
         }
 
-
-
         let mut buf = [0u8; MAX_ANSWER_LENGTH as usize];
         answer.copy_into_slice(&mut buf[..n as usize]);
         let mut start = 0usize;
@@ -479,13 +458,6 @@ impl HuntyCore {
         let hash = env.crypto().sha256(&normalized);
         Ok(hash.to_bytes())
     }
-
-
-
-
-
-
-    
 
     #[inline]
     fn is_ascii_space(b: u8) -> bool {
@@ -663,7 +635,6 @@ impl HuntyCore {
             .publish((Symbol::new(&env, "RewardManagerSet"),), event);
     }
 
-
     /// Completes a hunt for a player and distributes rewards.
     ///
     /// This function verifies that the player has completed all required clues,
@@ -741,32 +712,28 @@ impl HuntyCore {
         let mut progress = Storage::get_player_progress_or_error(env, hunt_id, &player)
             .map_err(HuntErrorCode::from)?;
 
-                /// Generates a completion certificate for a player who has finished a hunt.
-    pub fn generate_completion_certificate(
-        env: Env,
-        hunt_id: u64,
-        player: Address,
-    ) -> Result<String, HuntErrorCode> {
-        let progress = Storage::get_player_progress(&env, hunt_id, &player)
-            .ok_or(HuntErrorCode::PlayerNotRegistered)?;
+        /// Generates a completion certificate for a player who has finished a hunt.
+        pub fn generate_completion_certificate(
+            env: Env,
+            hunt_id: u64,
+            player: Address,
+        ) -> Result<String, HuntErrorCode> {
+            let progress = Storage::get_player_progress(&env, hunt_id, &player)
+                .ok_or(HuntErrorCode::PlayerNotRegistered)?;
 
-        if !progress.is_completed {
-            return Err(HuntErrorCode::HuntNotCompleted);
+            if !progress.is_completed {
+                return Err(HuntErrorCode::HuntNotCompleted);
+            }
+
+            let hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
+
+            let certificate = String::from_str(&env, "COMPLETION_CERTIFICATE");
+
+            let _ = hunt;
+            let _ = progress;
+
+            Ok(certificate)
         }
-
-        let hunt = Storage::get_hunt(&env, hunt_id)
-            .ok_or(HuntErrorCode::HuntNotFound)?;
-
-        let certificate = String::from_str(
-            &env,
-            "COMPLETION_CERTIFICATE",
-        );
-
-        let _ = hunt;
-        let _ = progress;
-
-        Ok(certificate)
-    }
 
         // Verify the player has completed all required clues
         if !progress.is_completed {
@@ -820,6 +787,10 @@ impl HuntyCore {
             } else {
                 None
             };
+            // description is intentionally excluded from NFT metadata: a creator could
+            // accidentally embed an answer or salt in the hunt description, which would
+            // then be permanently exposed on-chain via the cross-contract call.
+            // Only the title (already fully public) is forwarded.
             let (nft_contract, nft_title, nft_desc, nft_uri, nft_hunt_title) = if nft_awarded {
                 hunt.reward_config
                     .nft_contract
@@ -830,9 +801,7 @@ impl HuntyCore {
                         let uri = String::from_str(env, "");
                         let hunt_title = hunt.title.clone();
 
-                        // SECURITY: Never forward the hunt description into NFT metadata.
-                        // It may contain secrets, answers, or other sensitive creator notes.
-                        // This constraint is enforced by test coverage and documented in DEVELOPMENT.md.
+                        // === NFT Metadata Length Validation ===
                         if title.len() > MAX_NFT_TITLE_LENGTH {
                             // TODO: You can return Err(HuntErrorCode::InvalidNftMetadata) if you want strict validation
                             // For now, we truncate to prevent DoS / gas issues
@@ -900,15 +869,15 @@ impl HuntyCore {
 
         // Update hunt reward config
         hunt.reward_config.claimed_count += 1;
-        
+
         // Mark hunt as completed if all reward slots are taken
         if hunt.reward_config.claimed_count >= hunt.reward_config.max_winners {
             hunt.status = HuntStatus::Completed;
-            
-            // Optionally, we could emit a HuntStatusChangedEvent or HuntEndedEvent here 
+
+            // Optionally, we could emit a HuntStatusChangedEvent or HuntEndedEvent here
             // if we want to notify clients that the hunt is completely finished.
         }
-        
+
         Storage::save_hunt(env, &hunt);
 
         // Emit RewardClaimedEvent
@@ -1090,7 +1059,8 @@ impl HuntyCore {
             return Err(HuntErrorCode::InvalidAnswer);
         }
 
-        progress.complete_clue(&env, clue_id, clue.points, clue.is_required);
+        let points_earned = hunt.bonus_score(clue.points, current_time);
+        progress.complete_clue(&env, clue_id, points_earned, clue.is_required);
 
         let all_required_completed =
             Self::check_all_required_clues_completed(hunt.required_clues, &progress);
@@ -1144,29 +1114,10 @@ impl HuntyCore {
     /// # Returns
     /// `true` if all required clues are completed, `false` otherwise
     fn check_all_required_clues_completed(
-        env: &Env,
-        hunt_id: u64,
+        required_clue_count: u32,
         progress: &PlayerProgress,
     ) -> bool {
-        // Get all clues for the hunt
-        let all_clues = Storage::list_clues_for_hunt(env, hunt_id, 0, MAX_CLUES_PER_HUNT);
-
-        // Iterate through all clues and check if all required ones are completed
-        for i in 0..all_clues.len() {
-            let clue = all_clues.get(i).unwrap();
-
-            // If this is a required clue
-            if clue.is_required {
-                // Check if player has completed it
-                if !progress.has_completed_clue(clue.clue_id) {
-                    // Found a required clue that's not completed
-                    return false;
-                }
-            }
-        }
-
-        // All required clues are completed
-        true
+        progress.required_completed_count >= required_clue_count
     }
 
     /// Returns player progress for a hunt (read-only).
@@ -1284,7 +1235,7 @@ impl HuntyCore {
         let _ = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
         let queried_at = env.ledger().timestamp();
         let players = Storage::get_hunt_players(&env, hunt_id);
-        let total_players = players.len();
+        let total_players = players.len() as usize;
 
         let start = core::cmp::min(start_index, total_players);
         let capped_window = core::cmp::min(window_size, MAX_LEADERBOARD_SCAN_SIZE);
@@ -1292,7 +1243,7 @@ impl HuntyCore {
 
         let mut rows = Vec::new(&env);
         for i in start..end {
-            let p = players.get(i).unwrap();
+            let p = players.get(i as u32).unwrap();
             rows.push_back(crate::types::LeaderboardRow {
                 index: i,
                 player: p.player.clone(),
@@ -1363,7 +1314,7 @@ impl HuntyCore {
         best_idx
     }
 
-        /// Returns a list of all hunts (paginated).
+    /// Returns a list of all hunts (paginated).
     ///
     /// # Arguments
     /// * `env` - The Soroban environment
@@ -1391,10 +1342,7 @@ impl HuntyCore {
 
     /// Returns aggregate statistics for a hunt (read-only): total players, completion rate, average score.
     /// Returns error if hunt does not exist.
-    pub fn get_hunt_statistics(
-        env: Env,
-        hunt_id: u64,
-    ) -> Result<HuntStatistics, HuntErrorCode> {
+    pub fn get_hunt_statistics(env: Env, hunt_id: u64) -> Result<HuntStatistics, HuntErrorCode> {
         let _ = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
         let players = Storage::get_hunt_players(&env, hunt_id);
         let total_players = players.len() as u32;

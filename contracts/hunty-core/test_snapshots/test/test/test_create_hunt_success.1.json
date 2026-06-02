@@ -205,6 +205,24 @@
                             },
                             {
                               "key": {
+                                "symbol": "time_bonus_decay_secs"
+                              },
+                              "val": "void"
+                            },
+                            {
+                              "key": {
+                                "symbol": "time_bonus_min_bps"
+                              },
+                              "val": "void"
+                            },
+                            {
+                              "key": {
+                                "symbol": "time_bonus_start_bps"
+                              },
+                              "val": "void"
+                            },
+                            {
+                              "key": {
                                 "symbol": "title"
                               },
                               "val": {
