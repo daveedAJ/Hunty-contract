@@ -397,6 +397,11 @@ impl HuntyCore {
         Ok(hunt)
     }
 
+    /// Returns the total number of hunts created by this contract.
+    pub fn get_hunt_count(env: Env) -> u64 {
+        Storage::get_hunt_counter(&env)
+    }
+
     /// Sets the RewardManager contract address for cross-contract reward distribution.
     pub fn set_reward_manager(env: Env, reward_manager: Address) {
         Storage::set_reward_manager(&env, &reward_manager);
