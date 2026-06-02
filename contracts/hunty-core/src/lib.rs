@@ -257,6 +257,11 @@ impl HuntyCore {
         b == 0x20 || b == 0x09 || b == 0x0a || b == 0x0d
     }
 
+    #[inline]
+    fn validate_rarity(v: u32) -> bool {
+        v <= 5
+    }
+
     pub fn activate_hunt(env: Env, hunt_id: u64, caller: Address) -> Result<(), HuntErrorCode> {
         let mut hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
 
@@ -492,6 +497,10 @@ impl HuntyCore {
 
         let reward_amount = hunt.reward_config.reward_per_winner();
         let nft_awarded = hunt.reward_config.nft_enabled;
+
+        if !Self::validate_rarity(hunt.reward_config.nft_rarity) {
+            return Err(HuntErrorCode::InvalidRarity);
+        }
 
         // Call RewardManager if configured and there are rewards to distribute
         if let Some(reward_manager_addr) = Storage::get_reward_manager(env) {
