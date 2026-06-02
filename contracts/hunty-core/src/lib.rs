@@ -228,6 +228,9 @@ impl HuntyCore {
         if n > MAX_ANSWER_LENGTH {
             return Err(HuntError::InvalidAnswer);
         }
+
+
+
         let mut buf = [0u8; MAX_ANSWER_LENGTH as usize];
         answer.copy_into_slice(&mut buf[..n as usize]);
         let mut start = 0usize;
@@ -251,6 +254,13 @@ impl HuntyCore {
         let hash = env.crypto().sha256(&normalized);
         Ok(hash.to_bytes())
     }
+
+
+
+
+
+
+    
 
     #[inline]
     fn is_ascii_space(b: u8) -> bool {
