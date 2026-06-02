@@ -979,9 +979,7 @@ impl HuntyCore {
             return Err(HuntErrorCode::InvalidAnswer);
         }
 
-        // Calculate actual points earned with difficulty multiplier
-        let points_earned = clue.points.saturating_mul(clue.difficulty as u32);
-        progress.complete_clue(&env, clue_id, points_earned);
+        progress.complete_clue(&env, clue_id, clue.points, clue.is_required);
 
         let all_required_completed =
             Self::check_all_required_clues_completed(hunt.required_clues, &progress);
@@ -1206,15 +1204,25 @@ impl HuntyCore {
         hunt_id: u64,
     ) -> Result<HuntStatistics, HuntErrorCode> {
         let _ = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
-        let (total_players, completed_count, total_score_sum) =
-            Storage::get_hunt_stats(&env, hunt_id);
+        let players = Storage::get_hunt_players(&env, hunt_id);
+        let total_players = players.len() as u32;
+        let mut completed_count: u32 = 0;
+        let mut total_score_sum: u64 = 0;
+        for i in 0..players.len() {
+            let p = players.get(i).unwrap();
+            if p.is_completed {
+                completed_count += 1;
+            }
+            total_score_sum = total_score_sum.saturating_add(p.total_score as u64);
+        }
         let completion_rate_percent = if total_players > 0 {
             (completed_count * 100) / total_players
         } else {
             0
         };
         let average_score = if total_players > 0 {
-            (total_score_sum / (total_players as u64)) as u32
+            let avg = total_score_sum / (total_players as u64);
+            avg.min(u32::MAX as u64) as u32
         } else {
             0
         };
