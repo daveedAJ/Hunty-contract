@@ -173,11 +173,13 @@ impl PlayerProgress {
         false
     }
 
-    pub fn complete_clue(&mut self, _env: &Env, clue_id: u32, points: u32) {
+    pub fn complete_clue(&mut self, _env: &Env, clue_id: u32, points: u32) -> Result<(), crate::errors::HuntErrorCode> {
         if !self.has_completed_clue(clue_id) {
             self.completed_clues.push_back(clue_id);
-            self.total_score += points;
+            self.total_score = self.total_score.checked_add(points)
+                .ok_or(crate::errors::HuntErrorCode::ScoreOverflow)?;
         }
+        Ok(())
     }
 }
 

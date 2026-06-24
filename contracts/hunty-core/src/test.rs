@@ -2724,4 +2724,104 @@ mod test {
         });
         assert_eq!(result, Err(HuntErrorCode::InvalidHuntStatus));
     }
+
+    #[test]
+    fn test_score_overflow_on_complete_clue() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+
+        let (hunt_id, contract_id) = setup_completed_hunt_with_rewards(&env, &creator, &player, 5, 1000);
+
+        // Set player score to near max u32
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            let mut progress = Storage::get_player_progress(env, hunt_id, &player).unwrap();
+            progress.total_score = u32::MAX - 10;
+            Storage::save_player_progress(env, hunt_id, &player, &progress);
+        });
+
+        // Try to add a clue with points that would overflow
+        env.mock_all_auths();
+        let result = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::submit_answer(
+                env.clone(),
+                hunt_id,
+                1,
+                player.clone(),
+                String::from_str(env, "correct"),
+            )
+        });
+        assert_eq!(result, Err(HuntErrorCode::ScoreOverflow));
+    }
+
+    #[test]
+    fn test_statistics_score_overflow() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        let creator = Address::generate(&env);
+        let player1 = Address::generate(&env);
+        let player2 = Address::generate(&env);
+        let player3 = Address::generate(&env);
+
+        let (hunt_id, contract_id) = setup_completed_hunt_with_rewards(&env, &creator, &player1, 5, 1000);
+
+        // Register additional players and set their scores to high values
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::register_player(env.clone(), hunt_id, player2.clone()).unwrap();
+            HuntyCore::register_player(env.clone(), hunt_id, player3.clone()).unwrap();
+        });
+
+        // Set scores to values that would overflow when summed
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            let mut progress1 = Storage::get_player_progress(env, hunt_id, &player1).unwrap();
+            progress1.total_score = u32::MAX / 2;
+            Storage::save_player_progress(env, hunt_id, &player1, &progress1);
+
+            let mut progress2 = Storage::get_player_progress(env, hunt_id, &player2).unwrap();
+            progress2.total_score = u32::MAX / 2;
+            Storage::save_player_progress(env, hunt_id, &player2, &progress2);
+
+            let mut progress3 = Storage::get_player_progress(env, hunt_id, &player3).unwrap();
+            progress3.total_score = u32::MAX / 2;
+            progress3.is_completed = true;
+            Storage::save_player_progress(env, hunt_id, &player3, &progress3);
+        });
+
+        // Try to get statistics - should fail with ScoreOverflow
+        let result = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::get_hunt_statistics(env.clone(), hunt_id)
+        });
+        assert_eq!(result, Err(HuntErrorCode::ScoreOverflow));
+    }
+
+    #[test]
+    fn test_completion_rate_overflow() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        let creator = Address::generate(&env);
+
+        let (hunt_id, contract_id) = setup_completed_hunt_with_rewards(&env, &creator, &creator, 5, 1000);
+
+        // Simulate many completed players to trigger overflow in completion_count * 100
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            for i in 0..50 {
+                let player = Address::generate(env);
+                HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap();
+                let mut progress = Storage::get_player_progress(env, hunt_id, &player).unwrap();
+                progress.is_completed = true;
+                Storage::save_player_progress(env, hunt_id, &player, &progress);
+            }
+        });
+
+        // This should not overflow with 51 players (51 * 100 = 5100 < u32::MAX)
+        let result = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::get_hunt_statistics(env.clone(), hunt_id)
+        });
+        assert!(result.is_ok());
+    }
 }
