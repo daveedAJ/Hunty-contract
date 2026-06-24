@@ -15,6 +15,7 @@ impl Storage {
     const POOL_DEP_KEY: soroban_sdk::Symbol = symbol_short!("PDEP");
     const POOL_DST_KEY: soroban_sdk::Symbol = symbol_short!("PDST");
     const HUNTY_CORE_KEY: soroban_sdk::Symbol = symbol_short!("HCORE");
+    const IN_DISTRIBUTION_KEY: soroban_sdk::Symbol = symbol_short!("IN_DIST");
 
     // ========== XLM Token Address ==========
 
@@ -44,6 +45,17 @@ impl Storage {
 
     pub fn get_hunty_core(env: &Env) -> Option<Address> {
         env.storage().persistent().get(&Self::HUNTY_CORE_KEY)
+    }
+
+    pub fn set_in_distribution(env: &Env, value: bool) {
+        env.storage().persistent().set(&Self::IN_DISTRIBUTION_KEY, &value);
+    }
+
+    pub fn is_in_distribution(env: &Env) -> bool {
+        env.storage()
+            .persistent()
+            .get(&Self::IN_DISTRIBUTION_KEY)
+            .unwrap_or(false)
     }
 
     // ========== Default NFT Contract Address ==========

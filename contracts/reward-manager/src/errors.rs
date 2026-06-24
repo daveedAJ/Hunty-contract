@@ -23,4 +23,8 @@ pub enum RewardErrorCode {
     AlreadyInitialized = 12,
     /// hunt_id does not exist in HuntyCore (validated via cross-contract call).
     HuntNotFound = 13,
+    /// A recursive distribution attempt was detected during an external XLM or NFT call.
+    ReentrancyDetected = 14,
+    /// The tracked pool balance diverged from the actual XLM token balance.
+    PoolBalanceDivergence = 15,
 }

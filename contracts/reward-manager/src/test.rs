@@ -5,7 +5,7 @@ mod test {
     use crate::types::RewardConfig;
     use crate::RewardManager;
     use soroban_sdk::testutils::{Address as _, Ledger as _};
-    use soroban_sdk::{symbol_short, token, Address, Env};
+    use soroban_sdk::{symbol_short, token, Address, Env, Map, Symbol, Vec};
 
     /// Registers the RewardManager contract and a mock SAC token.
     /// Returns (contract_id, token_address, token_admin).
@@ -44,6 +44,141 @@ mod test {
             nft_hunt_title: soroban_sdk::String::from_str(env, ""),
             nft_rarity: 0,
             nft_tier: 0,
+        }
+    }
+
+    #[contract]
+    pub struct MaliciousToken;
+
+    #[contractimpl]
+    impl MaliciousToken {
+        const REWARD_MANAGER_KEY: soroban_sdk::Symbol = symbol_short!("RWMAN");
+        const NESTED_HUNT_ID_KEY: soroban_sdk::Symbol = symbol_short!("NHID");
+        const NESTED_PLAYER_KEY: soroban_sdk::Symbol = symbol_short!("NPLY");
+        const NESTED_AMOUNT_KEY: soroban_sdk::Symbol = symbol_short!("NAML");
+        const NESTED_RESULT_KEY: soroban_sdk::Symbol = symbol_short!("NRES");
+        const BALANCE_KEY: soroban_sdk::Symbol = symbol_short!("BALN");
+
+        pub fn configure(
+            env: Env,
+            reward_manager: Address,
+            hunt_id: u64,
+            player: Address,
+            amount: i128,
+        ) {
+            env.storage()
+                .persistent()
+                .set(&Self::REWARD_MANAGER_KEY, &reward_manager);
+            env.storage()
+                .persistent()
+                .set(&Self::NESTED_HUNT_ID_KEY, &hunt_id);
+            env.storage()
+                .persistent()
+                .set(&Self::NESTED_PLAYER_KEY, &player);
+            env.storage()
+                .persistent()
+                .set(&Self::NESTED_AMOUNT_KEY, &amount);
+            env.storage()
+                .persistent()
+                .set(&Self::NESTED_RESULT_KEY, &0u32);
+        }
+
+        pub fn mint(env: Env, to: Address, amount: i128) {
+            let key = Self::balance_key(&to);
+            let current: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+            env.storage()
+                .persistent()
+                .set(&key, &(current + amount));
+        }
+
+        pub fn balance(env: Env, who: Address) -> i128 {
+            env.storage()
+                .persistent()
+                .get(&Self::balance_key(&who))
+                .unwrap_or(0)
+        }
+
+        pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+            if from == Self::get_reward_manager(&env) {
+                let nested_result = Self::invoke_nested_distribution(&env);
+                env.storage()
+                    .persistent()
+                    .set(&Self::NESTED_RESULT_KEY, &nested_result);
+            }
+
+            let from_balance = Self::balance(env.clone(), from.clone());
+            assert!(from_balance >= amount, "insufficient balance");
+            env.storage()
+                .persistent()
+                .set(&Self::balance_key(&from), &(from_balance - amount));
+
+            let to_balance = Self::balance(env.clone(), to.clone());
+            env.storage()
+                .persistent()
+                .set(&Self::balance_key(&to), &(to_balance + amount));
+        }
+
+        pub fn nested_result(env: Env) -> u32 {
+            env.storage()
+                .persistent()
+                .get(&Self::NESTED_RESULT_KEY)
+                .unwrap_or(0u32)
+        }
+
+        fn balance_key(who: &Address) -> (soroban_sdk::Symbol, Address) {
+            (Self::BALANCE_KEY, who.clone())
+        }
+
+        fn get_reward_manager(env: &Env) -> Address {
+            env.storage()
+                .persistent()
+                .get(&Self::REWARD_MANAGER_KEY)
+                .unwrap()
+        }
+
+        fn invoke_nested_distribution(env: &Env) -> u32 {
+            let reward_manager = Self::get_reward_manager(env);
+            let hunt_id: u64 = env
+                .storage()
+                .persistent()
+                .get(&Self::NESTED_HUNT_ID_KEY)
+                .unwrap();
+            let player: Address = env
+                .storage()
+                .persistent()
+                .get(&Self::NESTED_PLAYER_KEY)
+                .unwrap();
+            let amount: i128 = env
+                .storage()
+                .persistent()
+                .get(&Self::NESTED_AMOUNT_KEY)
+                .unwrap();
+
+            let reward_config = RewardConfig {
+                xlm_amount: Some(amount),
+                nft_contract: None,
+                nft_title: soroban_sdk::String::from_str(env, ""),
+                nft_description: soroban_sdk::String::from_str(env, ""),
+                nft_image_uri: soroban_sdk::String::from_str(env, ""),
+                nft_hunt_title: soroban_sdk::String::from_str(env, ""),
+                nft_rarity: 0,
+                nft_tier: 0,
+            };
+
+            let mut args = Vec::new(env);
+            args.push_back(hunt_id.into_val(env));
+            args.push_back(player.clone().into_val(env));
+            args.push_back(reward_config.into_val(env));
+
+            match env.try_invoke_contract::<(), RewardErrorCode>(
+                &reward_manager,
+                &Symbol::new(env, "distribute_rewards"),
+                args,
+            ) {
+                Err(_) => 255,
+                Ok(Ok(())) => 0,
+                Ok(Err(err)) => err as u32,
+            }
         }
     }
 
@@ -729,6 +864,49 @@ mod test {
 
         // Verify player only received once
         assert_eq!(get_balance(&env, &token_address, &player), 2_000);
+    }
+
+    #[test]
+    fn test_distribute_rewards_reentrancy_during_xlm_transfer_is_blocked() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+
+        let contract_id = env.register(RewardManager, ());
+        let token_contract_id = env.register(MaliciousToken, ());
+        let token_address = token_contract_id.address();
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+
+        env.as_contract(&token_contract_id, || {
+            MaliciousToken::mint(env.clone(), creator.clone(), 10_000);
+        });
+
+        env.as_contract(&contract_id, || {
+            initialize_contract(&env, &token_address);
+            RewardManager::create_reward_pool(env.clone(), creator.clone(), 1, 0).unwrap();
+            RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 10_000).unwrap();
+        });
+
+        env.as_contract(&token_contract_id, || {
+            MaliciousToken::configure(env.clone(), contract_id.clone(), 1, player.clone(), 2_000);
+        });
+
+        env.as_contract(&contract_id, || {
+            let result = RewardManager::distribute_rewards(env.clone(), 1, player.clone(), xlm_only_config(&env, 2_000));
+            assert!(result.is_ok());
+        });
+
+        // Verify the nested reentrant call was rejected by the guard.
+        env.as_contract(&token_contract_id, || {
+            assert_eq!(MaliciousToken::nested_result(env.clone()),
+                RewardErrorCode::ReentrancyDetected as u32);
+        });
+
+        // Verify the outer distribution completed and the contract guard was cleared.
+        env.as_contract(&contract_id, || {
+            assert!(!Storage::is_in_distribution(&env));
+            assert!(RewardManager::is_reward_distributed(env.clone(), 1, player.clone()));
+        });
     }
 
     #[test]
