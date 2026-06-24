@@ -688,13 +688,8 @@ impl HuntyCore {
             progress.is_completed = true;
             progress.completed_at = current_time;
 
-            // Emit HuntCompleted event with rank
-            // Increment completed count and obtain rank
-            let mut hunt_mut = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
-            hunt_mut.completed_count += 1;
-            let rank = hunt_mut.completed_count;
-            // Save updated hunt before publishing event
-            Storage::save_hunt(&env, &hunt_mut);
+            // Rank is the number of already-completed players plus this player.
+            let rank = Self::completion_rank(&env, hunt_id);
             let hunt_completed_event = HuntCompletedEvent {
                 hunt_id,
                 player: player.clone(),
@@ -722,6 +717,18 @@ impl HuntyCore {
         );
 
         Ok(())
+    }
+
+    fn completion_rank(env: &Env, hunt_id: u64) -> u32 {
+        let players = Storage::get_hunt_players(env, hunt_id);
+        let mut completed_players = 0u32;
+        for i in 0..players.len() {
+            let progress = players.get(i).unwrap();
+            if progress.is_completed {
+                completed_players += 1;
+            }
+        }
+        completed_players.saturating_add(1)
     }
 
     fn validate_submission_timestamp(

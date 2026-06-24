@@ -101,11 +101,22 @@ pub struct AdminImageUrisUpdatedEvent {
     pub updated_count: u32,
 }
 
+/// Event emitted when an owner changes operator approval.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct OperatorChangedEvent {
+    pub owner: Address,
+    pub operator: Address,
+    pub approved: bool,
+}
+
 mod errors;
 pub use errors::NftErrorCode;
 mod migration;
 mod storage;
 use storage::Storage;
+
+const CONTRACT_VERSION: u32 = 1;
 
 #[contract]
 pub struct NftReward;
@@ -126,7 +137,7 @@ impl NftReward {
         admin.require_auth();
         Storage::save_admin(&env, &admin);
         Storage::set_max_supply(&env, max_supply);
-        Storage::set_contract_version(&env, Self::CONTRACT_VERSION);
+        Storage::set_contract_version(&env, CONTRACT_VERSION);
         Ok(())
     }
 
@@ -284,6 +295,7 @@ impl NftReward {
             nft_id,
             hunt_id,
             owner: player_address.clone(),
+            completion_player: player_address.clone(),
             metadata: metadata.clone(),
             transferable,
             minted_at,
@@ -344,7 +356,7 @@ impl NftReward {
         reward_manager: Address,
     ) -> Result<(), crate::errors::NftErrorCode> {
         Self::require_admin(&env, &admin)?;
-        Storage::save_reward_manager(&env, &reward_manager);
+        Storage::set_reward_manager(&env, &reward_manager);
         Ok(())
     }
 
@@ -632,7 +644,7 @@ impl NftReward {
 
     /// Returns the on-chain version stored during initialize, or the compiled constant.
     pub fn contract_version(env: Env) -> u32 {
-        Storage::get_contract_version(&env).unwrap_or(Self::CONTRACT_VERSION)
+        Storage::get_contract_version(&env).unwrap_or(CONTRACT_VERSION)
     }
 
     /// Grants `operator` the ability to manage all NFTs owned by `owner`.
