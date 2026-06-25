@@ -2889,4 +2889,51 @@ mod test {
         });
         assert_eq!(result, Err(HuntErrorCode::PlayerNotRegistered));
     }
+
+    #[test]
+    fn test_create_hunt_rejects_control_characters_in_title() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        let creator = Address::generate(&env);
+        let title = String::from_str(&env, "Bad\x07Title");
+        let description = String::from_str(&env, "Valid description");
+
+        let result = with_core_contract(&env, |env, _cid| {
+            HuntyCore::create_hunt(env.clone(), creator, title, description, None, None)
+        });
+
+        assert_eq!(result, Err(HuntErrorCode::InvalidTitle));
+    }
+
+    #[test]
+    fn test_add_clue_rejects_control_characters_in_question() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        let creator = Address::generate(&env);
+
+        let hunt_id = with_core_contract(&env, |env, _cid| {
+            HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Hunt"),
+                String::from_str(env, "Desc"),
+                None,
+                None,
+            )
+        })
+        .unwrap();
+
+        let result = with_core_contract(&env, |env, _cid| {
+            HuntyCore::add_clue(
+                env.clone(),
+                hunt_id,
+                String::from_str(env, "Q\x01?"),
+                String::from_str(env, "answer"),
+                10,
+                true,
+            )
+        });
+
+        assert_eq!(result, Err(HuntErrorCode::InvalidQuestion));
+    }
 }

@@ -101,9 +101,59 @@ pub struct AdminImageUrisUpdatedEvent {
     pub updated_count: u32,
 }
 
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct OperatorChangedEvent {
+    pub owner: Address,
+    pub operator: Address,
+    pub approved: bool,
+}
+
+const MAX_URI_BYTES: usize = 512;
+const MAX_NFT_TITLE_BYTES: u32 = 200;
+const MAX_NFT_DESCRIPTION_BYTES: u32 = 2000;
+const MAX_NFT_URI_BYTES: u32 = 512;
+
+fn string_starts_with(s: &String, prefix: &String) -> bool {
+    let s_len = s.len() as usize;
+    let p_len = prefix.len() as usize;
+    if p_len > s_len {
+        return false;
+    }
+    if p_len == 0 {
+        return true;
+    }
+    if s_len > MAX_URI_BYTES || p_len > MAX_URI_BYTES {
+        return false;
+    }
+    let mut s_buf = [0u8; MAX_URI_BYTES];
+    let mut p_buf = [0u8; MAX_URI_BYTES];
+    s.copy_into_slice(&mut s_buf[..s_len]);
+    prefix.copy_into_slice(&mut p_buf[..p_len]);
+    s_buf[..p_len] == p_buf[..p_len]
+}
+
+fn replace_string_prefix(env: &Env, s: &String, old_prefix: &String, new_prefix: &String) -> String {
+    let s_len = s.len() as usize;
+    let p_len = old_prefix.len() as usize;
+    let new_prefix_len = new_prefix.len() as usize;
+    if s_len > MAX_URI_BYTES || p_len > s_len || new_prefix_len + (s_len - p_len) > MAX_URI_BYTES {
+        return s.clone();
+    }
+    let mut s_buf = [0u8; MAX_URI_BYTES];
+    s.copy_into_slice(&mut s_buf[..s_len]);
+    let suffix = &s_buf[p_len..s_len];
+
+    let mut new_buf = [0u8; MAX_URI_BYTES];
+    new_prefix.copy_into_slice(&mut new_buf[..new_prefix_len]);
+    new_buf[new_prefix_len..new_prefix_len + suffix.len()].copy_from_slice(suffix);
+    String::from_bytes(env, &new_buf[..new_prefix_len + suffix.len()])
+}
+
 mod errors;
 pub use errors::NftErrorCode;
 mod migration;
+mod sanitization;
 mod storage;
 use storage::Storage;
 
@@ -112,6 +162,8 @@ pub struct NftReward;
 
 #[contractimpl]
 impl NftReward {
+    pub const CONTRACT_VERSION: u32 = 1;
+
     /// Initializes the NFT reward contract with an admin address and optional max supply cap.
     /// Call this once to set the admin who can manage the contract.
     pub fn initialize(
@@ -259,6 +311,18 @@ impl NftReward {
         Self::mint_reward_nft_impl(env, hunt_id, player_address, meta, transferable)
     }
 
+    fn sanitize_metadata_field(
+        env: &Env,
+        value: &String,
+        max_bytes: u32,
+        allow_empty: bool,
+    ) -> String {
+        match sanitization::StringSanitizer::sanitize(env, value, max_bytes, allow_empty) {
+            Ok(s) => s,
+            Err(_) => panic_with_error!(env, crate::errors::NftErrorCode::InvalidMetadata),
+        }
+    }
+
     fn mint_reward_nft_impl(
         env: Env,
         hunt_id: u64,
@@ -269,6 +333,20 @@ impl NftReward {
         if metadata.rarity > 5 {
             panic_with_error!(&env, crate::errors::NftErrorCode::InvalidRarity);
         }
+
+        let mut metadata = metadata;
+        metadata.title =
+            Self::sanitize_metadata_field(&env, &metadata.title, MAX_NFT_TITLE_BYTES, false);
+        metadata.description = Self::sanitize_metadata_field(
+            &env,
+            &metadata.description,
+            MAX_NFT_DESCRIPTION_BYTES,
+            true,
+        );
+        metadata.image_uri =
+            Self::sanitize_metadata_field(&env, &metadata.image_uri, MAX_NFT_URI_BYTES, true);
+        metadata.hunt_title =
+            Self::sanitize_metadata_field(&env, &metadata.hunt_title, MAX_NFT_TITLE_BYTES, true);
 
         if let Some(max_supply) = Storage::get_max_supply(&env) {
             let current_supply = Storage::get_nft_counter(&env);
@@ -284,6 +362,7 @@ impl NftReward {
             nft_id,
             hunt_id,
             owner: player_address.clone(),
+            completion_player: player_address.clone(),
             metadata: metadata.clone(),
             transferable,
             minted_at,
@@ -375,13 +454,10 @@ impl NftReward {
         for nft_id in 1..=total {
             if let Some(mut nft) = Storage::get_nft(&env, nft_id) {
                 let uri = nft.metadata.image_uri.clone();
-                let uri_str = uri.as_str();
 
-                if uri_str.starts_with(old_prefix.as_str()) {
-                    let suffix = uri_str.strip_prefix(old_prefix.as_str()).unwrap_or("");
-                    let new_uri = String::from_str(&env, new_prefix.as_str())
-                        .concat(&String::from_str(&env, suffix));
-                    nft.metadata.image_uri = new_uri;
+                if string_starts_with(&uri, &old_prefix) {
+                    nft.metadata.image_uri =
+                        replace_string_prefix(&env, &uri, &old_prefix, &new_prefix);
                     Storage::save_nft(&env, &nft);
                     updated += 1;
                 }
@@ -417,6 +493,15 @@ impl NftReward {
         if nft.owner != updater {
             return Err(crate::errors::NftErrorCode::NotOwner);
         }
+
+        let new_description = Self::sanitize_metadata_field(
+            &env,
+            &new_description,
+            MAX_NFT_DESCRIPTION_BYTES,
+            true,
+        );
+        let new_image_uri =
+            Self::sanitize_metadata_field(&env, &new_image_uri, MAX_NFT_URI_BYTES, true);
 
         nft.metadata.description = new_description;
         nft.metadata.image_uri = new_image_uri;
