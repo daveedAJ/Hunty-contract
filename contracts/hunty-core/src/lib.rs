@@ -99,6 +99,7 @@ impl HuntyCore {
             reward_config,
             total_clues: 0, // Empty clue list initially
             required_clues: 0,
+            completed_count: 0,
         };
 
         // Store the hunt
@@ -888,18 +889,81 @@ impl HuntyCore {
     /// Initializes schema version tracking on deploy or first admin call.
     pub fn initialize_schema(env: Env, admin: Address) {
         admin.require_auth();
-        migration::HuntyCoreMigration::initialize_schema(&env);
+        migration::HuntyCoreMigration::initialize_schema(&env, &admin);
+    }
+
+    /// Proposes a schema upgrade that becomes executable after the configured timelock.
+    pub fn propose_upgrade(
+        env: Env,
+        admin: Address,
+        target_version: u32,
+    ) -> Result<hunty_migration::UpgradeProposal, hunty_migration::UpgradeAuthError> {
+        let proposal = migration::HuntyCoreMigration::propose_upgrade(&env, &admin, target_version)?;
+        env.events().publish(
+            migration::HuntyCoreMigration::upgrade_proposed_topic(&env),
+            migration::HuntyCoreMigration::upgrade_proposed_event(&proposal),
+        );
+        Ok(proposal)
+    }
+
+    /// Sets the timelock delay (seconds) before a proposed upgrade can execute. Admin only.
+    pub fn set_upgrade_timelock(
+        env: Env,
+        admin: Address,
+        delay_seconds: u64,
+    ) -> Result<(), hunty_migration::UpgradeAuthError> {
+        migration::HuntyCoreMigration::set_upgrade_timelock(&env, &admin, delay_seconds)
+    }
+
+    /// Returns the pending upgrade proposal, if any.
+    pub fn get_upgrade_proposal(env: Env) -> Option<hunty_migration::UpgradeProposal> {
+        migration::HuntyCoreMigration::get_upgrade_proposal(&env)
+    }
+
+    /// Returns the configured upgrade timelock in seconds.
+    pub fn get_upgrade_timelock(env: Env) -> u64 {
+        migration::HuntyCoreMigration::get_upgrade_timelock(&env)
+    }
+
+    /// Returns paginated upgrade execution history.
+    pub fn get_upgrade_history(
+        env: Env,
+        offset: u32,
+        limit: u32,
+    ) -> soroban_sdk::Vec<hunty_migration::UpgradeHistoryEntry> {
+        migration::HuntyCoreMigration::get_upgrade_history(&env, offset, limit)
     }
 
     /// Runs storage migrations up to `target_version`. Set `dry_run` to simulate without writes.
-    pub fn run_migration(env: Env, admin: Address, target_version: u32, dry_run: bool) -> migration::MigrationReport {
-        admin.require_auth();
-        migration::HuntyCoreMigration::run_migration(&env, target_version, dry_run)
+    pub fn run_migration(
+        env: Env,
+        admin: Address,
+        target_version: u32,
+        dry_run: bool,
+    ) -> Result<migration::MigrationReport, hunty_migration::UpgradeAuthError> {
+        let from_version = migration::HuntyCoreMigration::get_schema_version(&env);
+        let report =
+            migration::HuntyCoreMigration::run_migration(&env, &admin, target_version, dry_run)?;
+        if !dry_run && report.succeeded && report.from_version < report.to_version {
+            env.events().publish(
+                migration::HuntyCoreMigration::upgrade_executed_topic(&env),
+                migration::HuntyCoreMigration::upgrade_executed_event(
+                    from_version,
+                    report.to_version,
+                    env.ledger().timestamp(),
+                    admin,
+                ),
+            );
+        }
+        Ok(report)
     }
 
     /// Rolls back to the schema version captured before the last migration.
-    pub fn rollback_migration(env: Env, admin: Address) -> Option<migration::MigrationReport> {
-        migration::HuntyCoreMigration::rollback_migration(&env, admin)
+    pub fn rollback_migration(
+        env: Env,
+        admin: Address,
+    ) -> Result<migration::MigrationReport, hunty_migration::UpgradeAuthError> {
+        migration::HuntyCoreMigration::rollback_migration(&env, &admin)
     }
 
     /// Returns contract health metrics for operator dashboards.

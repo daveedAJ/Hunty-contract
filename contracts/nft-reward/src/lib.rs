@@ -101,6 +101,53 @@ pub struct AdminImageUrisUpdatedEvent {
     pub updated_count: u32,
 }
 
+/// Event emitted when an operator approval is granted or revoked.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct OperatorChangedEvent {
+    pub owner: Address,
+    pub operator: Address,
+    pub approved: bool,
+}
+
+const MAX_URI_BYTES: usize = 512;
+
+fn string_starts_with(s: &String, prefix: &String) -> bool {
+    let s_len = s.len() as usize;
+    let p_len = prefix.len() as usize;
+    if p_len > s_len {
+        return false;
+    }
+    if p_len == 0 {
+        return true;
+    }
+    if s_len > MAX_URI_BYTES || p_len > MAX_URI_BYTES {
+        return false;
+    }
+    let mut s_buf = [0u8; MAX_URI_BYTES];
+    let mut p_buf = [0u8; MAX_URI_BYTES];
+    s.copy_into_slice(&mut s_buf[..s_len]);
+    prefix.copy_into_slice(&mut p_buf[..p_len]);
+    s_buf[..p_len] == p_buf[..p_len]
+}
+
+fn replace_string_prefix(env: &Env, s: &String, old_prefix: &String, new_prefix: &String) -> String {
+    let s_len = s.len() as usize;
+    let p_len = old_prefix.len() as usize;
+    let new_prefix_len = new_prefix.len() as usize;
+    if s_len > MAX_URI_BYTES || p_len > s_len || new_prefix_len + (s_len - p_len) > MAX_URI_BYTES {
+        return s.clone();
+    }
+    let mut s_buf = [0u8; MAX_URI_BYTES];
+    s.copy_into_slice(&mut s_buf[..s_len]);
+    let suffix = &s_buf[p_len..s_len];
+
+    let mut new_buf = [0u8; MAX_URI_BYTES];
+    new_prefix.copy_into_slice(&mut new_buf[..new_prefix_len]);
+    new_buf[new_prefix_len..new_prefix_len + suffix.len()].copy_from_slice(suffix);
+    String::from_bytes(env, &new_buf[..new_prefix_len + suffix.len()])
+}
+
 mod errors;
 pub use errors::NftErrorCode;
 mod migration;
@@ -112,6 +159,8 @@ pub struct NftReward;
 
 #[contractimpl]
 impl NftReward {
+    pub const CONTRACT_VERSION: u32 = 1;
+
     /// Initializes the NFT reward contract with an admin address and optional max supply cap.
     /// Call this once to set the admin who can manage the contract.
     pub fn initialize(
@@ -284,6 +333,7 @@ impl NftReward {
             nft_id,
             hunt_id,
             owner: player_address.clone(),
+            completion_player: player_address.clone(),
             metadata: metadata.clone(),
             transferable,
             minted_at,
@@ -375,13 +425,10 @@ impl NftReward {
         for nft_id in 1..=total {
             if let Some(mut nft) = Storage::get_nft(&env, nft_id) {
                 let uri = nft.metadata.image_uri.clone();
-                let uri_str = uri.as_str();
 
-                if uri_str.starts_with(old_prefix.as_str()) {
-                    let suffix = uri_str.strip_prefix(old_prefix.as_str()).unwrap_or("");
-                    let new_uri = String::from_str(&env, new_prefix.as_str())
-                        .concat(&String::from_str(&env, suffix));
-                    nft.metadata.image_uri = new_uri;
+                if string_starts_with(&uri, &old_prefix) {
+                    nft.metadata.image_uri =
+                        replace_string_prefix(&env, &uri, &old_prefix, &new_prefix);
                     Storage::save_nft(&env, &nft);
                     updated += 1;
                 }
@@ -675,18 +722,72 @@ impl NftReward {
         migration::NftRewardMigration::initialize_schema(&env);
     }
 
+    pub fn propose_upgrade(
+        env: Env,
+        admin: Address,
+        target_version: u32,
+    ) -> Result<hunty_migration::UpgradeProposal, hunty_migration::UpgradeAuthError> {
+        let proposal =
+            migration::NftRewardMigration::propose_upgrade(&env, &admin, target_version)?;
+        env.events().publish(
+            migration::NftRewardMigration::upgrade_proposed_topic(&env),
+            migration::NftRewardMigration::upgrade_proposed_event(&proposal),
+        );
+        Ok(proposal)
+    }
+
+    pub fn set_upgrade_timelock(
+        env: Env,
+        admin: Address,
+        delay_seconds: u64,
+    ) -> Result<(), hunty_migration::UpgradeAuthError> {
+        migration::NftRewardMigration::set_upgrade_timelock(&env, &admin, delay_seconds)
+    }
+
+    pub fn get_upgrade_proposal(env: Env) -> Option<hunty_migration::UpgradeProposal> {
+        migration::NftRewardMigration::get_upgrade_proposal(&env)
+    }
+
+    pub fn get_upgrade_timelock(env: Env) -> u64 {
+        migration::NftRewardMigration::get_upgrade_timelock(&env)
+    }
+
+    pub fn get_upgrade_history(
+        env: Env,
+        offset: u32,
+        limit: u32,
+    ) -> soroban_sdk::Vec<hunty_migration::UpgradeHistoryEntry> {
+        migration::NftRewardMigration::get_upgrade_history(&env, offset, limit)
+    }
+
     pub fn run_migration(
         env: Env,
         admin: Address,
         target_version: u32,
         dry_run: bool,
-    ) -> migration::MigrationReport {
-        admin.require_auth();
-        migration::NftRewardMigration::run_migration(&env, target_version, dry_run)
+    ) -> Result<migration::MigrationReport, hunty_migration::UpgradeAuthError> {
+        let from_version = migration::NftRewardMigration::get_schema_version(&env);
+        let report =
+            migration::NftRewardMigration::run_migration(&env, &admin, target_version, dry_run)?;
+        if !dry_run && report.succeeded && report.from_version < report.to_version {
+            env.events().publish(
+                migration::NftRewardMigration::upgrade_executed_topic(&env),
+                migration::NftRewardMigration::upgrade_executed_event(
+                    from_version,
+                    report.to_version,
+                    env.ledger().timestamp(),
+                    admin,
+                ),
+            );
+        }
+        Ok(report)
     }
 
-    pub fn rollback_migration(env: Env, admin: Address) -> Option<migration::MigrationReport> {
-        migration::NftRewardMigration::rollback_migration(&env, admin)
+    pub fn rollback_migration(
+        env: Env,
+        admin: Address,
+    ) -> Result<migration::MigrationReport, hunty_migration::UpgradeAuthError> {
+        migration::NftRewardMigration::rollback_migration(&env, &admin)
     }
 
     /// Searches NFTs by rarity tier.
