@@ -37,6 +37,7 @@ pub struct Hunt {
     pub reward_config: RewardConfig,
     pub total_clues: u32,
     pub required_clues: u32,
+    pub max_submissions_per_minute: u32,
 }
 
 /// Stored clue with SHA256 answer hash. The hash is never exposed via get_clue/list_clues or events.
@@ -108,6 +109,7 @@ pub struct StoredPlayerProgress {
     pub completed_at: u64,
     pub is_completed: bool,
     pub reward_claimed: bool,
+    pub recent_submissions: Vec<u64>,
 }
 
 /// Public view of player progress, with `player` and `hunt_id` reconstructed from the key.
@@ -122,6 +124,7 @@ pub struct PlayerProgress {
     pub completed_at: u64,
     pub is_completed: bool,
     pub reward_claimed: bool,
+    pub recent_submissions: Vec<u64>,
 }
 
 impl PlayerProgress {
@@ -135,6 +138,7 @@ impl PlayerProgress {
             completed_at: 0,
             is_completed: false,
             reward_claimed: false,
+            recent_submissions: Vec::new(env),
         }
     }
 
@@ -147,6 +151,7 @@ impl PlayerProgress {
             completed_at: self.completed_at,
             is_completed: self.is_completed,
             reward_claimed: self.reward_claimed,
+            recent_submissions: self.recent_submissions.clone(),
         }
     }
 
@@ -161,6 +166,7 @@ impl PlayerProgress {
             completed_at: stored.completed_at,
             is_completed: stored.is_completed,
             reward_claimed: stored.reward_claimed,
+            recent_submissions: stored.recent_submissions,
         }
     }
 

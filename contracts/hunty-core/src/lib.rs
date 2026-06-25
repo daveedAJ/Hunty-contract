@@ -50,6 +50,7 @@ impl HuntyCore {
         description: String,
         _start_time: Option<u64>,
         end_time: Option<u64>,
+        max_submissions_per_minute: u32,
     ) -> Result<u64, HuntErrorCode> {
         // Validate creator address - in Soroban, Address is always valid if constructed,
         // but we ensure it's not a zero/null address pattern if needed
@@ -100,6 +101,7 @@ impl HuntyCore {
             reward_config,
             total_clues: 0, // Empty clue list initially
             required_clues: 0,
+            max_submissions_per_minute,
         };
 
         // Store the hunt
@@ -690,10 +692,34 @@ impl HuntyCore {
             return Err(HuntErrorCode::ClueAlreadyCompleted);
         }
 
+        if hunt.max_submissions_per_minute > 0 {
+            let mut updated_submissions = Vec::new(&env);
+            for i in 0..progress.recent_submissions.len() {
+                let ts = progress.recent_submissions.get(i).unwrap();
+                if current_time < ts + 60 {
+                    updated_submissions.push_back(ts);
+                }
+            }
+            progress.recent_submissions = updated_submissions;
+
+            if progress.recent_submissions.len() >= hunt.max_submissions_per_minute {
+                let oldest_ts = progress.recent_submissions.get(0).unwrap();
+                let elapsed = current_time.saturating_sub(oldest_ts);
+                let cooldown_remaining = 60u64.saturating_sub(elapsed);
+                return Err(HuntErrorCode::from(HuntError::RateLimitExceeded {
+                    cooldown_remaining,
+                }));
+            }
+        }
+
         let submitted_hash =
             Self::normalize_and_hash_answer(&env, &answer).map_err(HuntErrorCode::from)?;
 
         if submitted_hash != clue.answer_hash {
+            if hunt.max_submissions_per_minute > 0 {
+                progress.recent_submissions.push_back(current_time);
+                Storage::save_player_progress(&env, &progress);
+            }
             // Answer is incorrect - emit analytics event and return error
             let incorrect_event = AnswerIncorrectEvent {
                 hunt_id,
@@ -709,6 +735,10 @@ impl HuntyCore {
         }
 
         progress.complete_clue(&env, clue_id, clue.points);
+        
+        if hunt.max_submissions_per_minute > 0 {
+            progress.recent_submissions = Vec::new(&env);
+        }
 
         let all_required_completed =
             Self::check_all_required_clues_completed(&env, hunt_id, &progress);
