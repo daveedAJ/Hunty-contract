@@ -386,7 +386,7 @@ impl Storage {
             .set(&symbol_short!("CVER"), &version);
     }
 
-    pub fn get_contract_version(env: &Env) -> Option<u32> {
+    pub fn get_contract_version(env: &Env) -> Option<crate::SemVer> {
         env.storage().instance().get(&symbol_short!("CVER"))
     }
 

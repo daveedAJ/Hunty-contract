@@ -8,7 +8,7 @@ use crate::nft_handler::NftHandler;
 use crate::storage::Storage;
 pub use crate::types::{
     DistributionRecord, DistributionStatus, RewardConfig, RewardPoolConfig, RewardPoolStatus,
-    ValidationResult,
+    SemVer, ValidationResult,
 };
 use crate::xlm_handler::XlmHandler;
 
@@ -134,10 +134,10 @@ pub struct EmergencyWithdrawalLogEntry {
 
 #[contractimpl]
 impl RewardManager {
-    /// Current version of this contract. Bump when making breaking changes.
-    pub const CONTRACT_VERSION: u32 = 1;
+    /// Current semantic version of this contract.
+    pub const CONTRACT_VERSION: SemVer = SemVer { major: 1, minor: 0, patch: 0 };
     /// Minimum NftReward version this contract requires.
-    pub const REQUIRED_NFT_REWARD_VERSION: u32 = 1;
+    pub const REQUIRED_NFT_REWARD_VERSION: SemVer = SemVer { major: 1, minor: 0, patch: 0 };
 
     /// Initializes the RewardManager with the XLM token contract address (SAC).
     /// Must be called once before any reward distribution.
@@ -149,7 +149,7 @@ impl RewardManager {
         admin.require_auth();
         Storage::set_admin(&env, &admin);
         Storage::set_xlm_token(&env, &xlm_token);
-        Storage::set_contract_version(&env, Self::CONTRACT_VERSION);
+        Storage::set_contract_version(&env, &Self::CONTRACT_VERSION);
         Ok(())
     }
 
@@ -911,10 +911,10 @@ impl RewardManager {
     pub fn check_nft_reward_compatibility(env: Env, nft_reward_address: Address) -> bool {
         let ver: u32 = env.invoke_contract(
             &nft_reward_address,
-            &soroban_sdk::Symbol::new(&env, "contract_version"),
+            &soroban_sdk::Symbol::new(&env, "get_version"),
             soroban_sdk::Vec::new(&env),
         );
-        ver >= Self::REQUIRED_NFT_REWARD_VERSION
+        ver.is_compatible_with(&Self::REQUIRED_NFT_REWARD_VERSION)
     }
 
     pub fn get_schema_version(env: Env) -> u32 {
